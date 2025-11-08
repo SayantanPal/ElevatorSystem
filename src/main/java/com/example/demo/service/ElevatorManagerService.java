@@ -76,9 +76,7 @@ public class ElevatorManagerService implements Serializable {// ElevatorDispatch
     }
 
     public void initElevator(){
-        for(int i = 0; i < IConstants.INITIAL_ELEVATOR_COUNT; i++){
-            createElevator();
-        }
+        this.createElevator(IConstants.INITIAL_ELEVATOR_COUNT);
     }
 
     /*
@@ -96,7 +94,7 @@ public class ElevatorManagerService implements Serializable {// ElevatorDispatch
     public List<Elevator> createElevator(int count){
         List<Elevator> created = new ArrayList<>();
         for(int i = 0; i < count; i++){
-            created.add(createElevator());
+            created.add(this.createElevator());
         }
         return created;
     }

@@ -63,6 +63,13 @@ public class Elevator {
         this.currentFloor = new AtomicInteger(IConstants.BASE_FLOOR); // start at ground floor by default
     }
 
+    public Elevator(ElevatorState elevatorState, int startingFloor){
+        this.elevatorId = Helper.generateUUID();
+        this.elevatorState = elevatorState;
+        this.destinationFloors = new ConcurrentSkipListSet<>();
+        this.currentFloor = new AtomicInteger(startingFloor);
+    }
+
     public boolean isMoving(){
         return this.isMovingUp() || this.isMovingDown();
     }
