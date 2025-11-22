@@ -141,10 +141,10 @@ public class ElevatorMovementService implements Serializable {
         }
     }
 
-    private void handleArrival(Elevator elevator) {
+    private void handleArrivalForAssignedFloor(Elevator elevator) {
         int currentFloor = elevator.getCurrentFloor().get();
 
-        // Remove this floor from assigned destinations list for serving elevator
+        // Remove this floor from assigned floor list for serving elevator
         elevator.removeDestinationFloor(currentFloor);
 
         // Process any requests from this floor
@@ -161,23 +161,29 @@ public class ElevatorMovementService implements Serializable {
         }
     }
 
-    private boolean shouldStopAtFloor(Elevator elevator, int floor) {
-        // Stop if this floor is a destination
-        if (elevator.getDestinationFloors().contains(floor)) {
+    // Check if a pending floor request to be picked can be served along the way
+    // in case if elevator is passing through that floor
+    private boolean shouldStopAtFloor(Elevator elevator, int targetFloor) {
+        // Check if this floor assigned to this elevator already as active floor req also one of the target floor at runtime out of sudden
+        if (elevator.getDestinationFloors().contains(targetFloor)) {
             return true;
         }
 
-        // Stop if there's a pending request from this floor going in same direction
-        Queue<ElevatorRequest> pendingFloorServeRequests = UserRequestCache.getPendingRequests();
-        return pendingFloorServeRequests.stream()
-                .anyMatch(request ->
-                        request.getFromSrcFloor() == floor // pending/unassigned requested floor matches with currently moving floor
-                        && (Helper.checkElevatorMovingInSameDirectionAsFloorReq(elevator, request))
-                        && request.getRequestStatus() == RequestStatus.PENDING);
+        // Check if there's a pending request from a person going in the same direction as that of elevator through currently passing floor
+//        Queue<ElevatorRequest> pendingFloorServeRequests = UserRequestCache.getPendingRequests();
+//        return pendingFloorServeRequests.stream()
+//                .anyMatch(request ->
+//                        request.getFromSrcFloor() == targetFloor // pending/unassigned requested floor matches with currently moving floor
+//                        && (Helper.checkElevatorMovingInSameDirectionAsFloorReq(elevator, request))
+//                        && request.getRequestStatus() == RequestStatus.PENDING
+//                );
+        return false;
     }
 
+    // Target floor can be floor from where to pick (src) or floor to drop (dest)
     private void moveOneFloor(Elevator elevator, int targetFloor) {
         int currentFloor = elevator.getCurrentFloor().get();
+        // move current floor by one step/floor up or down
         int nextFloor = currentFloor + (targetFloor > currentFloor ? 1 : -1);
 
         // Update elevator position
@@ -185,24 +191,32 @@ public class ElevatorMovementService implements Serializable {
         elevator.setCurrentFloor(new AtomicInteger(nextFloor));
 
         // Check if we should stop at this current floor
+        // From Pending Req: if a user request comes all of a sudden while the elevator is moving
+        // OR Active Req Assigned: if this floor is already assigned to this elevator as active floor request
         if (shouldStopAtFloor(elevator, nextFloor)) {
             stopAtFloor(elevator, nextFloor);
         }
     }
 
-    public void moveElevator(String elevatorId) {
-        Elevator elevator = elevatorRepository.findById(elevatorId);
+    public void moveElevator(Elevator elevator) {
         if (elevator == null || !elevator.isMoving()) {
             return;
         }
 
-        int nextFloor = elevator.findNearestImmediateFloor();
-        if (nextFloor == elevator.getCurrentFloor().get()) { // if it has arrived at destination
-            handleArrival(elevator);
-        } else { // if it has not yet arrived at destination floor
-            // Move one floor
-            moveOneFloor(elevator, nextFloor);
+        // if the next upcoming floor to serve is among the next immediate assigned src/dest floor
+        int toBeServedNearestAssignedFloor = elevator.findNearestImmediateFloor();
+        int currentlyPassingFloor = elevator.getCurrentFloor().get();
+        if (toBeServedNearestAssignedFloor == currentlyPassingFloor) { // if elevator has arrived at src/dest floor
+            handleArrivalForAssignedFloor(elevator);
+        } else { // if it has not yet arrived at src/dest floor
+            // Move one floor step by step
+            moveOneFloor(elevator, toBeServedNearestAssignedFloor);
         }
+    }
+
+    public void moveElevator(String elevatorId) {
+        Elevator elevator = elevatorRepository.findById(elevatorId);
+        this.moveElevator(elevator);
     }
 
     /* it becomes generic, reusable door-handling utility
@@ -229,18 +243,22 @@ public class ElevatorMovementService implements Serializable {
     }
 
     private void stopAtFloor(Elevator elevator, int floor) {
-        // Remove from destinations
+
+        // Remove this floor from assigned floor list for serving elevator
         elevator.removeDestinationFloor(floor);
 
         // Process requests originating at this floor (assign elevator destinations and update statuses)
         List<ElevatorRequest> floorRequests = Helper.getActiveRequestsFromFloor(floor);
         for (ElevatorRequest request : floorRequests) {
-            if (request.getRequestStatus() == RequestStatus.PENDING
-                    && Helper.checkElevatorMovingInSameDirectionAsFloorReq(elevator, request)) {
+            if (
+//                    request.getRequestStatus() == RequestStatus.PENDING
+//                    &&
+                    Helper.checkElevatorMovingInSameDirectionAsFloorReq(elevator, request)) {
                 // assign this elevator to the request: mark in-progress and add destination
                 request.setRequestStatus(RequestStatus.IN_PROGRESS);
+
                 elevator.addDestinationFloor(request.getToDestFloor());
-                Helper.makePendingRequestActiveForServing(request);
+//                Helper.makePendingRequestActiveForServing(request);
             }
         }
 

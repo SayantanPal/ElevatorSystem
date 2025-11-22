@@ -162,8 +162,6 @@ public class ElevatorManagerService implements Serializable {// ElevatorDispatch
             }
     }
 
-
-
     private Elevator processPendingFloorRequest(ElevatorRequest request) {
         // Scheduler determines which floor request is suitable to be mapped to which elevator
         Elevator bestElevator = scheduler.findBestElevator(ElevatorCache.elevators, request);

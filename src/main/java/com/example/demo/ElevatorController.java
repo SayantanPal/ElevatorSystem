@@ -14,8 +14,8 @@ public class ElevatorController {
         this.elevatorManagerService = ElevatorManagerService.getInstance();
     }
 
-    public void createElevator() {
-        this.elevatorManagerService.createElevator();
+    public Elevator createElevator() {
+        return this.elevatorManagerService.createElevator();
     }
 
     // In case of elevator specific Floor Direction Call,

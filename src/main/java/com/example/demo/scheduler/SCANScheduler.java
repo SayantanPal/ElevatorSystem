@@ -40,13 +40,15 @@ public class SCANScheduler implements ElevatorScheduler {
 
     @Override
     public Elevator findBestElevator(List<Elevator> elevators, ElevatorRequest request){
+        // find eligible elevators which can either stay idle or moving in same direction as per request
         List<Elevator> suitableElevators = elevators.stream()
                                                     .filter(elevator -> {
-                                                        int targetFloor = (request.getRequestType() == RequestType.FLOOR_DIRECTION_CALL)
-                                                                ? request.getFromSrcFloor()
-                                                                : request.getToDestFloor();
+//                                                        int targetFloor = (request.getRequestType() == RequestType.FLOOR_DIRECTION_CALL)
+//                                                                ? request.getFromSrcFloor()
+//                                                                : request.getToDestFloor();
+                                                        int targetToBePickedFromSrcFloor = request.getFromSrcFloor();
 //                                                        return elevator.canAcceptFloorServeRequest(request.getToDestFloor());
-                                                        return elevator.canAcceptFloorServeRequest(targetFloor);
+                                                        return elevator.canAcceptFloorServeRequest(targetToBePickedFromSrcFloor);
                                                     })
                                                     .filter(elevator -> this.isElevatorSuitable(elevator, request))
                                                     .toList();
@@ -55,11 +57,11 @@ public class SCANScheduler implements ElevatorScheduler {
             return null;
         }
 
-        // find nearest elevator
+        // find nearest suitable/eligible elevator
         Elevator nearestElevator = suitableElevators.stream()
-                                .min(Comparator.comparingInt(elevator -> Math.abs(elevator.getCurrentFloor().get() - request.getFromSrcFloor())))
-                                .orElse(suitableElevators.get(0));
-
+                                .min(Comparator.comparingInt((Elevator elevator) -> Math.abs(elevator.getCurrentFloor().get() - request.getFromSrcFloor()))
+                                                    .thenComparing(elevator -> elevator.getElevatorState() == ElevatorState.IDLE ? 1 : 0)) // prioritize moving elevators over idle ones if distance is same
+                                .orElse(suitableElevators.get(0)); // fallback to first elevator by default if no elevator moving in same dir or any idle elevator found
         return nearestElevator;
 
     }

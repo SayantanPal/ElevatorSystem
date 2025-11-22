@@ -93,7 +93,7 @@ public class Elevator {
     public boolean canAcceptFloorServeRequest(int floor){
         return !((this.elevatorState == ElevatorState.MAINTENANCE)
                 || (this.elevatorState == ElevatorState.EMERGENCY))
-                && (this.getNoOfIncomingFloorServeRequest() <= IConstants.MAX_HOLDING_CAPACITY)
+//                && (this.getNoOfIncomingFloorServeRequest() <= IConstants.MAX_HOLDING_CAPACITY)
                 && (floor >= IConstants.BASE_FLOOR && floor <= IConstants.MAX_FLOOR_COUNT);
     }
 
