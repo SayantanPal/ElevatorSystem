@@ -142,7 +142,7 @@ public class ElevatorMovementService implements Serializable {
     }
 
     private void handleArrivalForAssignedFloor(Elevator elevator) {
-        int currentFloor = elevator.getCurrentFloor().get();
+        int currentFloor = elevator.getCurrentFloor();
 
         // Remove this floor from assigned floor list for serving elevator
         elevator.removeFloor(currentFloor);
@@ -182,13 +182,13 @@ public class ElevatorMovementService implements Serializable {
 
     // Target floor can be floor from where to pick (src) or floor to drop (dest)
     private void moveOneFloor(Elevator elevator, int targetFloor) {
-        int currentFloor = elevator.getCurrentFloor().get();
+        int currentFloor = elevator.getCurrentFloor();
         // move current floor by one step/floor up or down
         int nextFloor = currentFloor + (targetFloor > currentFloor ? 1 : -1);
 
         // Update elevator position
         // next floor becomes current floor now
-        elevator.setCurrentFloor(new AtomicInteger(nextFloor));
+        elevator.setCurrentFloor(nextFloor);
 
         // Check if we should stop at this current floor
         // From Pending Req: if a user request comes all of a sudden while the elevator is moving
@@ -205,7 +205,7 @@ public class ElevatorMovementService implements Serializable {
 
         // if the next upcoming floor to serve is among the next immediate assigned src/dest floor
         int toBeServedNearestAssignedFloor = elevator.findNearestImmediateFloor();
-        int currentlyPassingFloor = elevator.getCurrentFloor().get();
+        int currentlyPassingFloor = elevator.getCurrentFloor();
         if (toBeServedNearestAssignedFloor == currentlyPassingFloor) { // if elevator has arrived at src/dest floor
             handleArrivalForAssignedFloor(elevator);
         } else { // if it has not yet arrived at src/dest floor
@@ -225,7 +225,7 @@ public class ElevatorMovementService implements Serializable {
     * */
     private void simulateDoorOperations(Elevator elevator, Runnable afterDoorCloseAction) {
         System.out.printf("[Elevator %s] Doors opening at floor %d%n",
-                elevator.getElevatorId(), elevator.getCurrentFloor().get());
+                elevator.getElevatorId(), elevator.getCurrentFloor());
 
         // Door open + loading + door close simulation (non-blocking)
         elevator.setElevatorState(ElevatorState.LOADING);

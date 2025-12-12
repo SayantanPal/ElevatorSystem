@@ -32,11 +32,11 @@ public class SCANScheduler implements ElevatorScheduler {
 
                 // OR
                 || ((elevator.isMovingUp() && request.isUpward())
-                && elevator.getCurrentFloor().get() <= request.getFromSrcFloor())
+                && elevator.getCurrentFloor() <= request.getFromSrcFloor())
 
                 // OR
                 || ((elevator.isMovingDown() && request.isDownward())
-                && elevator.getCurrentFloor().get() >= request.getFromSrcFloor());
+                && elevator.getCurrentFloor() >= request.getFromSrcFloor());
     }
 
     // Returns Null when no elevator working or request is invalid
@@ -63,7 +63,7 @@ public class SCANScheduler implements ElevatorScheduler {
 
         // when the request is valid/legitimate and at least one elevator in working state to serve the request
         Elevator nearestSuitableElevator  = eligibleElevators.stream().filter(elevator -> this.isElevatorSuitable(elevator, request))// elevator moving in same dir or idle
-                                                    .min(Comparator.comparingInt((Elevator elevator) -> Math.abs(elevator.getCurrentFloor().get() - request.getFromSrcFloor())) // get min dist elevator
+                                                    .min(Comparator.comparingInt((Elevator elevator) -> Math.abs(elevator.getCurrentFloor() - request.getFromSrcFloor())) // get min dist elevator
                                                     .thenComparing(elevator -> elevator.getElevatorState() == ElevatorState.IDLE ? 1 : 0)) // prioritize moving elevators over idle ones if min distance is same as that of same dir moving elevator
                                                     .orElse(eligibleElevators.get(0)); // fallback(when all working elevators are moving in opposite direction) to first elevator as standby elevator by default if no elevator moving in same dir or any idle elevator found
 

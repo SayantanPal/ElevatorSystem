@@ -150,7 +150,8 @@ public class ElevatorManagerService implements Serializable {// ElevatorDispatch
 
                 // set elevator state if it was idle
                 if (pickUpElevator.isStandingIdle()) {
-                    int cur = pickUpElevator.getCurrentFloor() == null ? 1 : pickUpElevator.getCurrentFloor().get();
+                    int cur = pickUpElevator.getCurrentFloor();
+                    // int cur = pickUpElevator.getCurrentFloor() == null ? 1 : pickUpElevator.getCurrentFloor().get();
                     ElevatorState newState = request.getToDestFloor() > cur ? ElevatorState.MOVING_UP : ElevatorState.MOVING_DOWN;
                     pickUpElevator.setElevatorState(newState);
                 }

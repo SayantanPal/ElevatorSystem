@@ -9,6 +9,7 @@ import lombok.Setter;
 import java.util.*;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 /*
@@ -41,9 +42,9 @@ import java.util.concurrent.locks.ReentrantLock;
 * Fully thread-safe: No external synchronization needed.
 * */
 
-@Getter
-public class Elevator {
 
+public class Elevator {
+    @Getter
     private final String elevatorId;
 
     @Getter
@@ -52,10 +53,9 @@ public class Elevator {
     // Per-elevator lock used for fine-grained concurrency
     private final ReentrantLock lock = new ReentrantLock(true);
 
-    @Setter
     private volatile AtomicInteger currentFloor;
-    @Setter
-    private ElevatorState elevatorState;
+
+    private volatile AtomicReference<ElevatorState> elevatorState;
 
 
     public Elevator(ElevatorState elevatorState){
@@ -64,7 +64,7 @@ public class Elevator {
 
     public Elevator(ElevatorState elevatorState, int startingFloor){
         this.elevatorId = Helper.generateUUID();
-        this.elevatorState = elevatorState;
+        this.elevatorState = new AtomicReference<>(elevatorState);
         this.assignedFloors = new ConcurrentSkipListSet<>();
         this.currentFloor = new AtomicInteger(startingFloor);
     }
@@ -74,15 +74,15 @@ public class Elevator {
     }
 
     public boolean isMovingUp(){
-        return (this.elevatorState == ElevatorState.MOVING_UP);
+        return (this.elevatorState.get() == ElevatorState.MOVING_UP);
     }
 
     public boolean isMovingDown(){
-        return (this.elevatorState == ElevatorState.MOVING_DOWN);
+        return (this.elevatorState.get() == ElevatorState.MOVING_DOWN);
     }
 
     public boolean isStandingIdle(){
-        return (this.elevatorState == ElevatorState.IDLE);
+        return (this.elevatorState.get() == ElevatorState.IDLE);
     }
 
     public int getNoOfIncomingFloorServeRequest(){
@@ -90,8 +90,8 @@ public class Elevator {
     }
 
     public boolean canAcceptFloorServeRequest(int floor){
-        return !((this.elevatorState == ElevatorState.MAINTENANCE)
-                || (this.elevatorState == ElevatorState.EMERGENCY));
+        return !((this.elevatorState.get() == ElevatorState.MAINTENANCE)
+                || (this.elevatorState.get() == ElevatorState.EMERGENCY));
 //                && (this.getNoOfIncomingFloorServeRequest() <= IConstants.MAX_HOLDING_CAPACITY)
 //                && (floor >= IConstants.BASE_FLOOR && floor <= IConstants.MAX_FLOOR_COUNT);
     }
@@ -138,6 +138,22 @@ public class Elevator {
             return assignedFloors.last();
         }
         return nearestFloor;
+    }
+
+    public void setElevatorState(ElevatorState elevatorState){
+        this.elevatorState.set(elevatorState);
+    }
+
+    public ElevatorState getElevatorState() {
+        return elevatorState.get();
+    }
+
+    public void setCurrentFloor(int floor){
+        this.currentFloor.set(floor);
+    }
+
+    public int getCurrentFloor() {
+        return currentFloor.get();
     }
 
     // Getter used by manager/service code
