@@ -45,10 +45,12 @@ import java.util.concurrent.locks.ReentrantLock;
 public class Elevator {
 
     private final String elevatorId;
-    private final ConcurrentSkipListSet<Integer> destinationFloors;
+
+    @Getter
+    private final ConcurrentSkipListSet<Integer> assignedFloors;
 
     // Per-elevator lock used for fine-grained concurrency
-    private final ReentrantLock lock = new ReentrantLock();
+    private final ReentrantLock lock = new ReentrantLock(true);
 
     @Setter
     private volatile AtomicInteger currentFloor;
@@ -57,16 +59,13 @@ public class Elevator {
 
 
     public Elevator(ElevatorState elevatorState){
-        this.elevatorId = Helper.generateUUID();
-        this.elevatorState = elevatorState;
-        this.destinationFloors = new ConcurrentSkipListSet<>();
-        this.currentFloor = new AtomicInteger(IConstants.BASE_FLOOR); // start at ground floor by default
+        this(elevatorState, IConstants.BASE_FLOOR); // start at ground floor by default
     }
 
     public Elevator(ElevatorState elevatorState, int startingFloor){
         this.elevatorId = Helper.generateUUID();
         this.elevatorState = elevatorState;
-        this.destinationFloors = new ConcurrentSkipListSet<>();
+        this.assignedFloors = new ConcurrentSkipListSet<>();
         this.currentFloor = new AtomicInteger(startingFloor);
     }
 
@@ -87,56 +86,56 @@ public class Elevator {
     }
 
     public int getNoOfIncomingFloorServeRequest(){
-        return this.destinationFloors.size();
+        return this.assignedFloors.size();
     }
 
     public boolean canAcceptFloorServeRequest(int floor){
         return !((this.elevatorState == ElevatorState.MAINTENANCE)
-                || (this.elevatorState == ElevatorState.EMERGENCY))
+                || (this.elevatorState == ElevatorState.EMERGENCY));
 //                && (this.getNoOfIncomingFloorServeRequest() <= IConstants.MAX_HOLDING_CAPACITY)
-                && (floor >= IConstants.BASE_FLOOR && floor <= IConstants.MAX_FLOOR_COUNT);
+//                && (floor >= IConstants.BASE_FLOOR && floor <= IConstants.MAX_FLOOR_COUNT);
     }
 
-    public void addDestinationFloor(int destFloor){
+    public void addFloor(int destFloor){
         if (destFloor >= IConstants.BASE_FLOOR && destFloor <= IConstants.MAX_FLOOR_COUNT)
-            this.destinationFloors.add(destFloor); // T(n) = O(logn)
+            this.assignedFloors.add(destFloor); // T(n) = O(logn)
     }
 
-    public void addDestinationFloor(Collection<Integer> destFloors){
-        this.destinationFloors.addAll(destFloors);
+    public void addFloor(Collection<Integer> destFloors){
+        this.assignedFloors.addAll(destFloors);
     }
 
-    public void removeDestinationFloor(int destFloor){
-        this.destinationFloors.remove(destFloor); // T(n) = O(logn)
+    public void removeFloor(int destFloor){
+        this.assignedFloors.remove(destFloor); // T(n) = O(logn)
     }
 
-    public void removeDestinationFloor(Collection<Integer> destFloors){
-        this.destinationFloors.removeAll(destFloors);
+    public void removeFloor(Collection<Integer> destFloors){
+        this.assignedFloors.removeAll(destFloors);
     }
 
     /*
      * Elevator uses below Logic to determine among its assigned floor requests, which active floor request to serve first
      */
     public int findNearestImmediateFloor(){
-        if(destinationFloors.isEmpty()) return currentFloor.get();
+        if(assignedFloors.isEmpty()) return currentFloor.get();
 
         Integer nearestFloor = null;
 
         if(this.isMovingUp()){
-            Integer nearestUpFloor = this.destinationFloors.higher(this.currentFloor.get()); // immediate higher
-            nearestFloor = (nearestUpFloor != null) ? nearestUpFloor : this.destinationFloors.lower(this.currentFloor.get());
+            Integer nearestUpFloor = this.assignedFloors.higher(this.currentFloor.get()); // immediate higher
+            nearestFloor = (nearestUpFloor != null) ? nearestUpFloor : this.assignedFloors.lower(this.currentFloor.get());
         }else if(this.isMovingDown()){
-            Integer nearestDownFloor = this.destinationFloors.lower(this.currentFloor.get()); // immediate lower
-            nearestFloor = (nearestDownFloor != null) ? nearestDownFloor : this.destinationFloors.higher(this.currentFloor.get());
+            Integer nearestDownFloor = this.assignedFloors.lower(this.currentFloor.get()); // immediate lower
+            nearestFloor = (nearestDownFloor != null) ? nearestDownFloor : this.assignedFloors.higher(this.currentFloor.get());
         } else {
             // if idle, choose the closest in absolute terms
-            nearestFloor = this.destinationFloors.stream()
+            nearestFloor = this.assignedFloors.stream()
                     .min(Integer::compareTo)
                     .orElse(this.currentFloor.get());
         }
 
         if(nearestFloor == null){
-            return destinationFloors.last();
+            return assignedFloors.last();
         }
         return nearestFloor;
     }
@@ -146,4 +145,14 @@ public class Elevator {
         return lock;
     }
 
+    @Override
+    public String toString() {
+        return "Elevator{" +
+                "elevatorId='" + elevatorId + '\'' +
+                ", assignedFloors=" + assignedFloors +
+                ", lock=" + lock +
+                ", currentFloor=" + currentFloor +
+                ", elevatorState=" + elevatorState +
+                '}';
+    }
 }

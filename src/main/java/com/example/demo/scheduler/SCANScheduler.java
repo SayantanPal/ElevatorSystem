@@ -5,6 +5,7 @@ import com.example.demo.enums.RequestType;
 import com.example.demo.model.Elevator;
 import com.example.demo.model.ElevatorRequest;
 import com.example.demo.utility.Helper;
+import com.example.demo.utility.Validator;
 
 import java.util.Comparator;
 import java.util.HashMap;
@@ -38,32 +39,35 @@ public class SCANScheduler implements ElevatorScheduler {
                 && elevator.getCurrentFloor().get() >= request.getFromSrcFloor());
     }
 
+    // Returns Null when no elevator working or request is invalid
     @Override
     public Elevator findBestElevator(List<Elevator> elevators, ElevatorRequest request){
         // find eligible elevators which can either stay idle or moving in same direction as per request
-        List<Elevator> suitableElevators = elevators.stream()
+        //find working elevator and also filter legitimate/valid requests
+        List<Elevator> eligibleElevators = elevators.stream()
                                                     .filter(elevator -> {
 //                                                        int targetFloor = (request.getRequestType() == RequestType.FLOOR_DIRECTION_CALL)
 //                                                                ? request.getFromSrcFloor()
 //                                                                : request.getToDestFloor();
                                                         int targetToBePickedFromSrcFloor = request.getFromSrcFloor();
 //                                                        return elevator.canAcceptFloorServeRequest(request.getToDestFloor());
-                                                        return elevator.canAcceptFloorServeRequest(targetToBePickedFromSrcFloor);
-                                                    })
-                                                    .filter(elevator -> this.isElevatorSuitable(elevator, request))
-                                                    .toList();
+                                                        return elevator.canAcceptFloorServeRequest(targetToBePickedFromSrcFloor)
+                                                                && Validator.isValidRequest(request);
+                                                    }) // filter elevator not in any emergency or other state preventing it from serving valid requests
+                                            .toList();
 
-        if (suitableElevators.isEmpty()) {
+        if(eligibleElevators.isEmpty()){
+            // if all elevators are totally restricted(maintainenece/emergency) to serve that floor request
             return null;
         }
 
-        // find nearest suitable/eligible elevator
-        Elevator nearestElevator = suitableElevators.stream()
-                                .min(Comparator.comparingInt((Elevator elevator) -> Math.abs(elevator.getCurrentFloor().get() - request.getFromSrcFloor()))
-                                                    .thenComparing(elevator -> elevator.getElevatorState() == ElevatorState.IDLE ? 1 : 0)) // prioritize moving elevators over idle ones if distance is same
-                                .orElse(suitableElevators.get(0)); // fallback to first elevator by default if no elevator moving in same dir or any idle elevator found
-        return nearestElevator;
+        // when the request is valid/legitimate and at least one elevator in working state to serve the request
+        Elevator nearestSuitableElevator  = eligibleElevators.stream().filter(elevator -> this.isElevatorSuitable(elevator, request))// elevator moving in same dir or idle
+                                                    .min(Comparator.comparingInt((Elevator elevator) -> Math.abs(elevator.getCurrentFloor().get() - request.getFromSrcFloor())) // get min dist elevator
+                                                    .thenComparing(elevator -> elevator.getElevatorState() == ElevatorState.IDLE ? 1 : 0)) // prioritize moving elevators over idle ones if min distance is same as that of same dir moving elevator
+                                                    .orElse(eligibleElevators.get(0)); // fallback(when all working elevators are moving in opposite direction) to first elevator as standby elevator by default if no elevator moving in same dir or any idle elevator found
 
+        return nearestSuitableElevator;
     }
 
     public Map<ElevatorRequest, Elevator> findBestElevator(List<Elevator> elevators, List<ElevatorRequest> requests){

@@ -117,68 +117,68 @@ public class ElevatorManagerService implements Serializable {// ElevatorDispatch
     // or in-between mode Timed option → tryLock(timeout, unit) - That’s bounded blocking — you wait for some time, then move on
     // both bounded and non-blocking options allow doing other work or handling the unavailability gracefully instead of being stuck waiting/indefinitelu blocked by synchronized.
 
-    private void assignRequestToElevator(ElevatorRequest request, Elevator elevator) {
-
+    private void assignRequestToElevator(ElevatorRequest request, Elevator pickUpElevator) {
+        if(pickUpElevator == null){
+            LOGGER.info("No suitable elevator found to assign for request: {}", request);
+            System.out.println(LocalDateTime.now() + " - No suitable elevator found to assign for request: " + request);
+            return;
+        }
+        // Perform the multi-step update while holding the elevator lock
         boolean locked = false;
             try{
-                locked = elevator.getLock().tryLock(1, TimeUnit.SECONDS);
+                locked = pickUpElevator.getLock().tryLock(1, TimeUnit.SECONDS);
                 if (!locked) {
                     // Couldn't acquire per-elevator lock in time — requeue or handle fallback
                     UserRequestCache.getPendingRequests().offer(request);
                     return;
                 }
 
-                // Perform the multi-step update while holding the elevator lock
-
-                // If this is a floor call (user pressed up/down at a floor),
-                // elevator should be assigned to go to that source floor for pickup.
-                if (request.getRequestType() == RequestType.FLOOR_DIRECTION_CALL) {
-                    elevator.addDestinationFloor(request.getFromSrcFloor());
-                } else { // else, if destination-floor selection
-                    elevator.addDestinationFloor(request.getToDestFloor());
+                // scheduled elevator should be assigned to go to that source floor for pickup
+                // scheduled elevator relevant for only pick-up scenario in global floor call or global dest floor selection
+                pickUpElevator.addFloor(request.getFromSrcFloor());
+                if (request.getRequestType() == RequestType.DESTINATION_FLOOR_SELECTION) {
+                    pickUpElevator.addFloor(request.getToDestFloor()); // always add dest floor to same assigned elevator which picked up the user
                 }
 
                 request.setRequestStatus(RequestStatus.ASSIGNED);
 
-                UserRequestCache.getActiveRequests().put(request.getRequestId(), request);
+                if (request.getRequestType() == RequestType.DESTINATION_FLOOR_SELECTION) {
+                    UserRequestCache.getActiveRequests().put(request.getRequestId(), request);
+                }
+
                 UserRequestCache.getPendingRequests().remove(request);
 
                 // set elevator state if it was idle
-                if (elevator.isStandingIdle()) {
-                    int cur = elevator.getCurrentFloor() == null ? 1 : elevator.getCurrentFloor().get();
+                if (pickUpElevator.isStandingIdle()) {
+                    int cur = pickUpElevator.getCurrentFloor() == null ? 1 : pickUpElevator.getCurrentFloor().get();
                     ElevatorState newState = request.getToDestFloor() > cur ? ElevatorState.MOVING_UP : ElevatorState.MOVING_DOWN;
-                    elevator.setElevatorState(newState);
+                    pickUpElevator.setElevatorState(newState);
                 }
 
                 // persist change
-                this.elevatorRepository.save(elevator);
+                this.elevatorRepository.save(pickUpElevator);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 UserRequestCache.getPendingRequests().offer(request);
             } finally {
                 if (locked) {
-                    elevator.getLock().unlock();
+                    pickUpElevator.getLock().unlock();
                 }
             }
     }
 
-    private Elevator processPendingFloorRequest(ElevatorRequest request) {
-        // Scheduler determines which floor request is suitable to be mapped to which elevator
+    private Elevator assignRequestToElevator(ElevatorRequest request) {
+        // Scheduler determines which src/originating floor request is suitable to be mapped to which nearest elevator either idle or moving in same direction
+        // helps to find optimal/nearest working/idle elevator or fallback elevator to pick up a user from requested legitimate floor
         Elevator bestElevator = scheduler.findBestElevator(ElevatorCache.elevators, request);
-
-        if (bestElevator != null) {
-            assignRequestToElevator(request, bestElevator);
-        } else { // if scheduler cannot find suitable/optimal elevator to serve that particular floor req
-            // Re-queue if no elevator available
-            UserRequestCache.getPendingRequests().offer(request);
-        }
+        this.assignRequestToElevator(request, bestElevator);
         return bestElevator;
     }
 
     public void processAllPendingFloorRequests() {
         // Continuously pull floor request from waiting queue until it gets empty
         while (!UserRequestCache.getPendingRequests().isEmpty()) {
-            Elevator assignedElevator = this.processPendingFloorRequest(UserRequestCache.getPendingRequests().poll());
+            Elevator assignedElevator = this.assignRequestToElevator(UserRequestCache.getPendingRequests().poll());
             if(Objects.isNull(assignedElevator))
                 break;
         }
@@ -187,31 +187,39 @@ public class ElevatorManagerService implements Serializable {// ElevatorDispatch
     // In case of elevator specific Floor Direction Call,
     // you already know the elevator which you want to use
     // then you request that particular elevator
-    public Elevator requestParticularElevator(Elevator chosenElevator, RequestDirection requestDirection, int requestedFromFloor, RequestPriority requestPriority) {
+    public Elevator requestParticularElevatorForPickUp(Elevator chosenElevator, RequestDirection requestDirection, int requestedFromFloor, RequestPriority requestPriority) {
         ElevatorRequest request = new ElevatorRequest(requestPriority, requestedFromFloor, requestDirection);
         this.assignRequestToElevator(request, chosenElevator); // chosen elevator will first reach src floor
         return chosenElevator;
     }
 
-    // In case of global Floor Direction Call,
+    // In case of global Floor Direction Call - Passenger Requesting for Pickup,
+    // i.e., If this is a floor call (user pressed up/down at a floor),
     // algo needs to decide which elevator to map to
-    public Elevator requestElevator(RequestDirection requestDirection, int requestedFromFloor, RequestPriority requestPriority) {
+    public Elevator requestElevatorForPickUp(RequestDirection requestDirection, int requestedFromFloor, RequestPriority requestPriority) {
         ElevatorRequest request = new ElevatorRequest(requestPriority, requestedFromFloor, requestDirection);
-        Elevator bestElevator = this.processPendingFloorRequest(request);
-        return bestElevator;
+        // scheduler determines which is best elevator to assign as per floor req
+        // and then assigns request to that particular elevator
+        Elevator bestElevatorScheduledForPickUp = this.assignRequestToElevator(request);
+        return bestElevatorScheduledForPickUp;
     }
 
+    // Passenger Requesting for Drop-off
     // if elevator is already chosen (e.g., in case of in-elevator destination floor selection)
-    public void selectDestinationFloorInsideRequestedElevator(Elevator chosenElevator, int requestedFromFloor, int toDestFloor, RequestPriority requestPriority) {
+    public void selectDestinationFloorInsideRequestedElevatorForDropOff(Elevator chosenElevator, int requestedFromFloor, int toDestFloor, RequestPriority requestPriority) {
         ElevatorRequest request = new ElevatorRequest(requestPriority, requestedFromFloor, toDestFloor);
-        UserRequestCache.getPendingRequests().offer(request);
+//        UserRequestCache.getPendingRequests().offer(request);
+        // directly assign request to that particular elevator
         this.assignRequestToElevator(request, chosenElevator); // chosen elevator will then reach src floor
     }
 
+    // Passenger Requesting for both Pick-up & Drop-off
     // 3. In case of global Destination Floor Selection, algo needs to decide which elevator to map to
-    public void selectDestinationFloor(int requestedFromFloor, int toDestFloor, RequestPriority requestPriority) {
+    public void selectDestinationFloorOutsideForBothPickUpAndDropOff(int requestedFromFloor, int toDestFloor, RequestPriority requestPriority) {
         ElevatorRequest request = new ElevatorRequest(requestPriority, requestedFromFloor, toDestFloor);
         UserRequestCache.getPendingRequests().offer(request);
-        this.processPendingFloorRequest(request);
+        // scheduler determines which is best elevator to assign as per floor req
+        // and then assigns request to that particular elevator
+        this.assignRequestToElevator(request);
     }
 }

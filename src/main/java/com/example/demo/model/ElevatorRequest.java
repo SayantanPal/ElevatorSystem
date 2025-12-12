@@ -10,6 +10,7 @@ import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Getter
 public class ElevatorRequest {
@@ -26,6 +27,12 @@ public class ElevatorRequest {
 
     @Setter
     private RequestStatus requestStatus;
+
+    @Setter
+    private Elevator assignedElevator;
+
+    @Getter
+    private final AtomicBoolean isEnqueued = new AtomicBoolean(false);
 
 
     public ElevatorRequest(RequestPriority requestPriority, RequestType requestType, int fromSrcFloor){

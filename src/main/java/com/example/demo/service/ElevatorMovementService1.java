@@ -15,6 +15,7 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -34,29 +35,27 @@ import java.util.concurrent.atomic.AtomicInteger;
     * scheduleWithFixedDelay waits for the previous execution to complete, and only after that waits another delay before starting the next one.
 * */
 
-public class ElevatorMovementService implements Serializable {
+public class ElevatorMovementService1 implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     // Instance-level mutable state - state change is involved - hence non-static below
     private final ElevatorRepository elevatorRepository;
-    private final ScheduledExecutorService movementExecutor;
 
     // Optional: track scheduled tasks if you want to cancel later
     private final ConcurrentMap<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
 
+    private final Map<String, ScheduledExecutorService> elevatorExecutors = new ConcurrentHashMap<>();
+
     // Static utility components (shared, not business state) - Read only dependency - No state change
-    private static final Logger LOGGER = LoggerFactory.getLogger(ElevatorMovementService.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ElevatorMovementService1.class);
 
 
-    private ElevatorMovementService() {
+    private ElevatorMovementService1() {
         this.elevatorRepository = new ElevatorRepository();
         int noOfElevators = this.elevatorRepository.findCountOfElevators();
         // used to run the given tasks periodically or once after a given certain delay without blocking the caller.
-        this.movementExecutor = Executors.newScheduledThreadPool(noOfElevators); // One thread per elevator
-
         // Start movement processing for each elevator
-        startMovementProcessingForExisting(); // startMovementProcessing();
     }
 
     /*
@@ -65,36 +64,10 @@ public class ElevatorMovementService implements Serializable {
     * Thread-safe, lazy initialization.
     * */
 
-    // Static inner class responsible for holding the instance
-    private static class Holder {
-        private static final ElevatorMovementService INSTANCE = new ElevatorMovementService();
-    }
 
-    // Global access point
-    public static ElevatorMovementService getInstance() {
-        return Holder.INSTANCE;
-    }
-
-    // This ensures deserialization returns the existing instance
-    @Serial
-    protected Object readResolve() {
-        return getInstance();
-    }
-
-    @Override
-    protected Object clone() throws CloneNotSupportedException {
-        throw new CloneNotSupportedException("Singleton — cannot clone");
-    }
-
-    private void startMovementProcessingForExisting() {
-        List<Elevator> elevators = ElevatorCache.elevators; // shared list
-        for (Elevator elevator : elevators) {
-            scheduleElevator(elevator);
-        }
-    }
 
     // call this from manager after creating a new elevator
-    public void registerElevator(Elevator elevator) {
+    public void startElevator(Elevator elevator) {
         scheduleElevator(elevator);
     }
 
@@ -105,13 +78,17 @@ public class ElevatorMovementService implements Serializable {
 
     private void scheduleElevator(Elevator elevator) {
         if (scheduledTasks.containsKey(elevator.getElevatorId())) return;
-        ScheduledFuture<?> future;
-//        try (ScheduledExecutorService movementExecutor = Executors.newSingleThreadScheduledExecutor()) {
-            future = movementExecutor.scheduleAtFixedRate( //movementExecutor.scheduleAtFixedRate( // Non-Blocking Async Behavior - No Thread.sleep() or waiting involved - The call returns immediately.
-                    () -> moveElevator(elevator.getElevatorId()),
-                    0, 1, TimeUnit.SECONDS // The action runs 1 seconds later on a different thread.
-            );
-//        }
+        ScheduledExecutorService movementExecutor = Executors.newSingleThreadScheduledExecutor();
+
+        // Monitoring started: Monitoring and moves the elevator every second if needed
+        // Do not use try-with-resources for an executor you intend to keep running
+        // Executor Per Elevator On-Demand
+        ScheduledFuture<?> future = movementExecutor.scheduleAtFixedRate( // Non-Blocking Async Behavior - No Thread.sleep() or waiting involved - The call returns immediately.
+                () -> moveElevatorOrNot(elevator.getElevatorId()),
+                0, 1, TimeUnit.SECONDS // The action runs 1 seconds later on a different thread.
+        );
+
+        elevatorExecutors.put(elevator.getElevatorId(), movementExecutor);// to stop, cancel, restart, or manage an elevator’s movement thread later
         scheduledTasks.put(elevator.getElevatorId(), future);
     }
 
@@ -180,6 +157,34 @@ public class ElevatorMovementService implements Serializable {
         return false;
     }
 
+    public void moveElevatorOrNot(String elevatorId) {
+        Elevator elevator = elevatorRepository.findById(elevatorId);
+        this.moveElevatorOrNot(elevator);
+    }
+
+    public void moveElevatorOrNot(Elevator elevator) {
+        // only thread should move the elevator once the elevator state is set to MOVING state from IDLE state
+        // If in IDLE state, meaning no requests to serve for that elevator, thread should check but not move; the threads checks and remains idle
+        if (elevator == null || elevator.isStandingIdle() || elevator.getElevatorState().equals(ElevatorState.LOADING)) { // return when in loading or idle state
+            return; // do nothing but keep thread alive
+        }
+
+        // movement logic should not proceed when elevator is in idle or loading passengers
+
+        // if the next upcoming floor to serve is among the next immediate assigned src/dest floor
+        int toBeServedNearestAssignedFloor = elevator.findNearestImmediateFloor();
+        int currentlyPassingFloor = elevator.getCurrentFloor().get();
+        if (toBeServedNearestAssignedFloor == currentlyPassingFloor) { // if elevator has arrived at src/dest floor
+            handleArrivalForAssignedFloor(elevator);
+            if (elevator.getAssignedFloors().isEmpty()) {
+                elevator.setElevatorState(ElevatorState.IDLE);
+            }
+        } else { // if it has not yet arrived at src/dest floor
+            // Move one floor step by step
+            moveOneFloor(elevator, toBeServedNearestAssignedFloor);
+        }
+    }
+
     // Target floor can be floor from where to pick (src) or floor to drop (dest)
     private void moveOneFloor(Elevator elevator, int targetFloor) {
         int currentFloor = elevator.getCurrentFloor().get();
@@ -188,7 +193,7 @@ public class ElevatorMovementService implements Serializable {
 
         // Update elevator position
         // next floor becomes current floor now
-        elevator.setCurrentFloor(new AtomicInteger(nextFloor));
+        elevator.getCurrentFloor().set(nextFloor);
 
         // Check if we should stop at this current floor
         // From Pending Req: if a user request comes all of a sudden while the elevator is moving
@@ -198,44 +203,32 @@ public class ElevatorMovementService implements Serializable {
         }
     }
 
-    public void moveElevator(Elevator elevator) {
-        if (elevator == null || !elevator.isMoving()) {
-            return;
-        }
-
-        // if the next upcoming floor to serve is among the next immediate assigned src/dest floor
-        int toBeServedNearestAssignedFloor = elevator.findNearestImmediateFloor();
-        int currentlyPassingFloor = elevator.getCurrentFloor().get();
-        if (toBeServedNearestAssignedFloor == currentlyPassingFloor) { // if elevator has arrived at src/dest floor
-            handleArrivalForAssignedFloor(elevator);
-        } else { // if it has not yet arrived at src/dest floor
-            // Move one floor step by step
-            moveOneFloor(elevator, toBeServedNearestAssignedFloor);
-        }
-    }
-
-    public void moveElevator(String elevatorId) {
-        Elevator elevator = elevatorRepository.findById(elevatorId);
-        this.moveElevator(elevator);
-    }
-
     /* it becomes generic, reusable door-handling utility
     * “what to do after doors close” is customizable here
     * The method focuses on one responsibility — door operations only.
     * */
     private void simulateDoorOperations(Elevator elevator, Runnable afterDoorCloseAction) {
-        System.out.printf("[Elevator %s] Doors opening at floor %d%n",
+
+        ScheduledExecutorService movementExecutor = elevatorExecutors.get(elevator.getElevatorId());
+        if (movementExecutor == null) {
+            LOGGER.warn("No executor for elevator {}", elevator.getElevatorId());
+            // fallback: run after action directly or schedule on a shared fallback executor
+            if (afterDoorCloseAction != null) afterDoorCloseAction.run();
+            return;
+        }
+
+        System.out.printf("[Elevator %s] Doors opening at floor %d%n.",
                 elevator.getElevatorId(), elevator.getCurrentFloor().get());
 
         // Door open + loading + door close simulation (non-blocking)
-        elevator.setElevatorState(ElevatorState.LOADING);
+
         movementExecutor.schedule(() -> {
+            elevator.setElevatorState(ElevatorState.LOADING);
             System.out.printf("[Elevator %s] Door opened in 1 sec. Loading passengers...%n", elevator.getElevatorId());
         }, 1, TimeUnit.SECONDS); // door open time
 
         movementExecutor.schedule(() -> {
             System.out.printf("[Elevator %s] Passenger Loaded in 10 sec. Doors closing in 1 sec...%n", elevator.getElevatorId());
-            elevator.setElevatorState(ElevatorState.IDLE);
             if (afterDoorCloseAction != null) {
                 afterDoorCloseAction.run();
             }
@@ -294,4 +287,25 @@ public class ElevatorMovementService implements Serializable {
     }
 
 
+
+    // Static inner class responsible for holding the instance
+    private static class Holder {
+        private static final ElevatorMovementService1 INSTANCE = new ElevatorMovementService1();
+    }
+
+    // Global access point
+    public static ElevatorMovementService1 getInstance() {
+        return Holder.INSTANCE;
+    }
+
+    // This ensures deserialization returns the existing instance
+    @Serial
+    protected Object readResolve() {
+        return getInstance();
+    }
+
+    @Override
+    protected Object clone() throws CloneNotSupportedException {
+        throw new CloneNotSupportedException("Singleton — cannot clone");
+    }
 }
