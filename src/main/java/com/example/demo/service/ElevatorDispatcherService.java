@@ -69,15 +69,17 @@ public class ElevatorDispatcherService  implements Serializable {// ElevatorDisp
         Elevator bestElevator = null;
 
 
-        // Spin-Retry Pattern with fairness & circuit breaker fallback
+        // Spin-Retry Pattern with fairness & circuit breaker fallback - acknowledges the time-of-check-to-time-of-use(TOCTOU) race between selecting and assigning.
         try{
+            // Exponential backoff and a retry path to pendingRequests avoids busy-waiting and drops.
             while(retryAttempt <= MAX_RETRIES) { // thread retry to find another elevator till it gets the lock on some elevator
                 // Step-1. Selection of best elevator as per scheduling algo(read-heavy, short-lived operation)
                 // Scheduler is read-only; it selects bestElevator based on current elevator state.
-                // Scheduler has no concept of reservation; it can pick the same elevator for multiple selectors until the elevator is actually mutated.
+                // Scheduler has no concept of reservation; it can pick the same elevator for multiple selector threads until the elevator is actually mutated.
                 // SCANScheduler is fine for picking a elevator candidate, but it cannot guarantee the selected elevator remains suitable by the time previous request thread mutate elevator state in next assignment step
                 // scheduler reads shared elevator state without locks and returns a candidate. Between that read and the later mutation (assignment), the elevator state can change. This is a classic TOCTOU (time-of-check → time-of-use) race.
                 // That’s why reservation (tryLock while selecting) of elevator lock followed by reasonable timeout is needed
+
                 // Scheduler determines which src/originating floor request is suitable to be mapped to which nearest elevator either idle or moving in same direction
                 // helps to find optimal/nearest working/idle elevator or fallback elevator to pick up a user from requested legitimate floor
                 bestElevator =  scheduler.findBestElevator(ElevatorCache.elevators, request);
@@ -90,7 +92,7 @@ public class ElevatorDispatcherService  implements Serializable {// ElevatorDisp
 
                 // The lock acquisition is immediately after elevator selection, before assignment.
                 // Even if another thread picked the same elevator a millisecond earlier, the current thread will fail tryLock() and re-run selection, avoiding simultaneous assignment to the same elevator
-                // Fair lock to ensure FIFO order among waiting threads - ensure no starving threads
+                // Each elevator has Fair ReentrantLock to ensure FIFO order among waiting threads - ensure no starving threads
 
                 // tryLock() can succeed but the elevator may have been changed between scheduler read and acquiring the lock (e.g., movement thread just released and changed state).
                 // That's why If you have high concurrency, you might want slightly longer timeout, e.g., 10–50 ms, to reduce wasted CPU in tight retry loops.
